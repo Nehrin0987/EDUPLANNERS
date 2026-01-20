@@ -75,27 +75,6 @@
         border-radius: 10px;
         padding: 0.875rem 1rem;
         font-size: 0.95rem;
-        transition: all 0.3s ease;
-    }
-
-    .form-input:focus,
-    .form-select:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px var(--primary-light);
-    }
-
-    .form-input::placeholder {
-        color: var(--text-muted);
-    }
-
-    .form-select {
-        appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2364748B' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 1rem center;
-        padding-right: 2.5rem;
-        cursor: pointer;
     }
 
     .form-actions {
@@ -115,16 +94,6 @@
         padding: 0.75rem 1.5rem;
         border-radius: 10px;
         text-decoration: none;
-        transition: all 0.3s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .btn-cancel:hover {
-        background: var(--bg-secondary);
-        border-color: var(--text-muted);
-        color: var(--text-heading);
     }
 
     .btn-save {
@@ -135,36 +104,6 @@
         padding: 0.75rem 1.5rem;
         border-radius: 10px;
         cursor: pointer;
-        transition: all 0.3s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .btn-save:hover {
-        background: var(--primary-hover);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-    }
-
-    @media (max-width: 576px) {
-        .page-container {
-            padding: 1rem;
-        }
-
-        .form-card {
-            padding: 1.5rem;
-        }
-
-        .form-actions {
-            flex-direction: column-reverse;
-        }
-
-        .btn-cancel,
-        .btn-save {
-            width: 100%;
-            justify-content: center;
-        }
     }
 </style>
 {% endblock %}
@@ -186,6 +125,7 @@
             {% csrf_token %}
             <input type="hidden" name="action" value="add_class">
 
+            <!-- Semester -->
             <div class="form-group">
                 <label class="form-label">
                     Semester <span class="required">*</span>
@@ -193,34 +133,37 @@
                 <select name="semester_id" class="form-select" required>
                     <option value="">Select Semester</option>
                     {% for semester in semesters %}
-                    <option value="{{ semester.id }}" {% if selected_semester==semester.id %}selected{% endif %}>
+                    <option value="{{ semester.id }}"
+                        {% if selected_semester|default:''|stringformat:"s" == semester.id|stringformat:"s" %}
+                            selected
+                        {% endif %}
+                    >
                         {{ semester.department.code }} - Semester {{ semester.number }}
                     </option>
                     {% endfor %}
                 </select>
             </div>
 
+            <!-- Class Name -->
             <div class="form-group">
                 <label class="form-label">
                     Class Name / Section <span class="required">*</span>
                 </label>
-                <input type="text" name="name" class="form-input" placeholder="e.g., A, B, C" required>
+                <input type="text" name="name" class="form-input"
+                       placeholder="e.g., A, B, CS1" required>
             </div>
 
+            <!-- Capacity -->
             <div class="form-group">
-                <label class="form-label">
-                    Capacity
-                </label>
-                <input type="number" name="capacity" class="form-input" placeholder="60" value="60">
+                <label class="form-label">Capacity</label>
+                <input type="number" name="capacity" class="form-input" value="60">
             </div>
 
             <div class="form-actions">
                 <a href="{% url 'manage_semesters' %}" class="btn-cancel">
-                    <i class="bi bi-x-lg"></i>
                     Cancel
                 </a>
                 <button type="submit" class="btn-save">
-                    <i class="bi bi-check-lg"></i>
                     Save Class
                 </button>
             </div>
