@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
 
-{% block title %}Add Semester - EDUPLANNER{% endblock %}
+{% block title %}Add Semester & Classes - EDUPLANNER{% endblock %}
 
 {% block extra_css %}
 <style>
     .page-container {
         padding: 2rem;
-        max-width: 600px;
+        max-width: 800px;
         margin: 0 auto;
     }
 
@@ -47,10 +47,33 @@
         border-radius: 16px;
         padding: 2rem;
         box-shadow: var(--shadow-sm);
+        margin-bottom: 1.5rem;
+    }
+
+    .form-section-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-heading);
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .form-section-title i {
+        color: var(--primary-color);
     }
 
     .form-group {
         margin-bottom: 1.5rem;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
     }
 
     .form-label {
@@ -112,6 +135,100 @@
         border-color: var(--danger-color);
     }
 
+    .general-error {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid var(--danger-color);
+        color: var(--danger-color);
+        padding: 1rem;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    /* Classes Section */
+    .class-row {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        position: relative;
+    }
+
+    .class-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .class-row-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .class-row-number {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-muted);
+    }
+
+    .btn-remove-class {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-card);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.85rem;
+        color: var(--danger-color);
+    }
+
+    .btn-remove-class:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: var(--danger-color);
+    }
+
+    .btn-remove-class:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .class-fields {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .btn-add-class {
+        width: 100%;
+        background: transparent;
+        border: 2px dashed var(--border-color);
+        color: var(--text-muted);
+        padding: 1rem;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .btn-add-class:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+        background: var(--primary-light);
+    }
+
     .form-actions {
         display: flex;
         justify-content: flex-end;
@@ -161,6 +278,26 @@
         box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
     }
 
+    .empty-classes-hint {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        padding: 1rem;
+        background: var(--bg-secondary);
+        border-radius: 10px;
+        margin-bottom: 1rem;
+    }
+
+    @media (max-width: 768px) {
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+
+        .class-fields {
+            grid-template-columns: 1fr;
+        }
+    }
+
     @media (max-width: 576px) {
         .page-container {
             padding: 1rem;
@@ -191,98 +328,257 @@
     </a>
 
     <div class="page-header">
-        <h1><i class="bi bi-calendar-plus me-2"></i>Add Semester</h1>
-        <p>Create a new semester for a department</p>
+        <h1><i class="bi bi-calendar-plus me-2"></i>Add Semester & Classes</h1>
+        <p>Create a new semester and add classes in a single step</p>
     </div>
 
-    <div class="form-card">
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="add_semester">
+    {% if errors.general %}
+    <div class="general-error">
+        <i class="bi bi-exclamation-triangle"></i>
+        {{ errors.general }}
+    </div>
+    {% endif %}
 
-            <!-- Department -->
-            <div class="form-group {% if errors.department %}has-error{% endif %}">
-                <label class="form-label">
-                    Department <span class="required">*</span>
-                </label>
-                <select name="department_id" class="form-select" required>
-                    <option value="">Select Department</option>
-                    {% if departments %}
-                    {% for dept in departments %}
-                    <option value="{{ dept.id }}" {% if selected_dept==dept.id %}selected{% endif %}{% if
-                        form_data.department_id==dept.id|stringformat:"s" %}selected{% endif %}>
-                        {{ dept.code }} - {{ dept.name }}
-                    </option>
-                    {% endfor %}
+    <form method="post" id="semesterForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_semester">
+
+        <!-- Semester Details Section -->
+        <div class="form-card">
+            <div class="form-section-title">
+                <i class="bi bi-calendar-week"></i>
+                Semester Details
+            </div>
+
+            <div class="form-row">
+                <!-- Department -->
+                <div class="form-group {% if errors.department %}has-error{% endif %}">
+                    <label class="form-label">
+                        Department <span class="required">*</span>
+                    </label>
+                    <select name="department_id" class="form-select" required>
+                        <option value="">Select Department</option>
+                        {% if departments %}
+                        {% for dept in departments %}
+                        <option value="{{ dept.id }}" {% if selected_dept==dept.id %}selected{% endif %}{% if
+                            form_data.department_id==dept.id|stringformat:"s" %}selected{% endif %}>
+                            {{ dept.code }} - {{ dept.name }}
+                        </option>
+                        {% endfor %}
+                        {% endif %}
+                    </select>
+                    {% if errors.department %}
+                    <p class="form-error">
+                        <i class="bi bi-exclamation-circle"></i>
+                        {{ errors.department }}
+                    </p>
                     {% endif %}
-                </select>
-                {% if errors.department %}
-                <p class="form-error">
-                    <i class="bi bi-exclamation-circle"></i>
-                    {{ errors.department }}
-                </p>
-                {% endif %}
+                </div>
+
+                <!-- Semester Name/Number -->
+                <div class="form-group {% if errors.number %}has-error{% endif %}">
+                    <label class="form-label">
+                        Semester Name <span class="required">*</span>
+                    </label>
+                    <select name="number" class="form-select" required>
+                        <option value="">Select Semester</option>
+                        <option value="1" {% if form_data.number=="1" %}selected{% endif %}>Semester 1</option>
+                        <option value="2" {% if form_data.number=="2" %}selected{% endif %}>Semester 2</option>
+                        <option value="3" {% if form_data.number=="3" %}selected{% endif %}>Semester 3</option>
+                        <option value="4" {% if form_data.number=="4" %}selected{% endif %}>Semester 4</option>
+                        <option value="5" {% if form_data.number=="5" %}selected{% endif %}>Semester 5</option>
+                        <option value="6" {% if form_data.number=="6" %}selected{% endif %}>Semester 6</option>
+                        <option value="7" {% if form_data.number=="7" %}selected{% endif %}>Semester 7</option>
+                        <option value="8" {% if form_data.number=="8" %}selected{% endif %}>Semester 8</option>
+                    </select>
+                    {% if errors.number %}
+                    <p class="form-error">
+                        <i class="bi bi-exclamation-circle"></i>
+                        {{ errors.number }}
+                    </p>
+                    {% endif %}
+                </div>
             </div>
 
-            <!-- Semester Name/Number -->
-            <div class="form-group {% if errors.number %}has-error{% endif %}">
-                <label class="form-label">
-                    Semester Name <span class="required">*</span>
-                </label>
-                <select name="number" class="form-select" required>
-                    <option value="">Select Semester</option>
-                    <option value="1" {% if form_data.number=="1" %}selected{% endif %}>Semester 1</option>
-                    <option value="2" {% if form_data.number=="2" %}selected{% endif %}>Semester 2</option>
-                    <option value="3" {% if form_data.number=="3" %}selected{% endif %}>Semester 3</option>
-                    <option value="4" {% if form_data.number=="4" %}selected{% endif %}>Semester 4</option>
-                    <option value="5" {% if form_data.number=="5" %}selected{% endif %}>Semester 5</option>
-                    <option value="6" {% if form_data.number=="6" %}selected{% endif %}>Semester 6</option>
-                    <option value="7" {% if form_data.number=="7" %}selected{% endif %}>Semester 7</option>
-                    <option value="8" {% if form_data.number=="8" %}selected{% endif %}>Semester 8</option>
-                </select>
-                {% if errors.number %}
-                <p class="form-error">
-                    <i class="bi bi-exclamation-circle"></i>
-                    {{ errors.number }}
-                </p>
-                {% endif %}
+            <div class="form-row">
+                <!-- Academic Year -->
+                <div class="form-group {% if errors.academic_year %}has-error{% endif %}">
+                    <label class="form-label">
+                        Academic Year <span class="required">*</span>
+                    </label>
+                    <input type="text" name="academic_year" class="form-input" placeholder="e.g., 2024-25"
+                        value="{{ form_data.academic_year|default:'' }}" required>
+                    {% if errors.academic_year %}
+                    <p class="form-error">
+                        <i class="bi bi-exclamation-circle"></i>
+                        {{ errors.academic_year }}
+                    </p>
+                    {% endif %}
+                </div>
+
+                <!-- Status -->
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select name="is_active" class="form-select">
+                        <option value="1" {% if form_data.is_active=="1" or not form_data.is_active %}selected{% endif
+                            %}>Active</option>
+                        <option value="0" {% if form_data.is_active=="0" %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Classes Section -->
+        <div class="form-card">
+            <div class="form-section-title">
+                <i class="bi bi-people"></i>
+                Classes Under This Semester
             </div>
 
-            <!-- Academic Year -->
-            <div class="form-group {% if errors.academic_year %}has-error{% endif %}">
-                <label class="form-label">
-                    Academic Year <span class="required">*</span>
-                </label>
-                <input type="text" name="academic_year" class="form-input" placeholder="e.g., 2024-25"
-                    value="{{ form_data.academic_year|default:'' }}" required>
-                {% if errors.academic_year %}
-                <p class="form-error">
-                    <i class="bi bi-exclamation-circle"></i>
-                    {{ errors.academic_year }}
-                </p>
-                {% endif %}
+            <div class="empty-classes-hint">
+                <i class="bi bi-info-circle me-1"></i>
+                Add one or more classes to this semester. Classes are optional - you can add them later.
             </div>
 
-            <!-- Status -->
-            <div class="form-group">
-                <label class="form-label">Status</label>
-                <select name="is_active" class="form-select">
-                    <option value="1" selected>Active</option>
-                    <option value="0">Inactive</option>
-                </select>
+            <div id="classesContainer">
+                {% for cls in classes_data %}
+                <div class="class-row" data-index="{{ forloop.counter0 }}">
+                    <div class="class-row-header">
+                        <span class="class-row-number">Class {{ forloop.counter }}</span>
+                        <button type="button" class="btn-remove-class" onclick="removeClass(this)" {% if forloop.first
+                            and classes_data|length==1 %}disabled{% endif %}>
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    <div class="class-fields">
+                        <div
+                            class="form-group {% if errors.classes and errors.classes|length > forloop.counter0 and errors.classes.forloop.counter0 %}has-error{% endif %}">
+                            <label class="form-label">
+                                Class Name
+                            </label>
+                            <input type="text" name="class_name[]" class="form-input"
+                                placeholder="e.g., CSE A, CSE B, MCA A" value="{{ cls.name }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                Section / Batch
+                            </label>
+                            <input type="text" name="class_section[]" class="form-input"
+                                placeholder="e.g., A, B, Morning" value="{{ cls.section }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Status</label>
+                            <select name="class_status[]" class="form-select">
+                                <option value="1" {% if cls.status=="1" or not cls.status %}selected{% endif %}>Active
+                                </option>
+                                <option value="0" {% if cls.status=="0" %}selected{% endif %}>Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
             </div>
 
-            <div class="form-actions">
-                <a href="{% url 'manage_semesters' %}" class="btn-cancel">
+            <button type="button" class="btn-add-class" onclick="addClass()">
+                <i class="bi bi-plus-lg"></i>
+                Add Another Class
+            </button>
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'manage_semesters' %}" class="btn-cancel">
+                <i class="bi bi-x-lg"></i>
+                Cancel
+            </a>
+            <button type="submit" class="btn-save">
+                <i class="bi bi-check-lg"></i>
+                Save Semester & Classes
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let classCounter = {{ classes_data| length }};
+
+    function addClass() {
+        classCounter++;
+        const container = document.getElementById('classesContainer');
+        const newRow = document.createElement('div');
+        newRow.className = 'class-row';
+        newRow.dataset.index = classCounter - 1;
+        newRow.innerHTML = `
+            <div class="class-row-header">
+                <span class="class-row-number">Class ${classCounter}</span>
+                <button type="button" class="btn-remove-class" onclick="removeClass(this)">
                     <i class="bi bi-x-lg"></i>
-                    Cancel
-                </a>
-                <button type="submit" class="btn-save">
-                    <i class="bi bi-check-lg"></i>
-                    Save Semester
                 </button>
             </div>
-        </form>
-    </div>
-</div>
+            <div class="class-fields">
+                <div class="form-group">
+                    <label class="form-label">
+                        Class Name
+                    </label>
+                    <input type="text" name="class_name[]" class="form-input" 
+                        placeholder="e.g., CSE A, CSE B, MCA A">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">
+                        Section / Batch
+                    </label>
+                    <input type="text" name="class_section[]" class="form-input" 
+                        placeholder="e.g., A, B, Morning">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select name="class_status[]" class="form-select">
+                        <option value="1" selected>Active</option>
+                        <option value="0">Inactive</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        container.appendChild(newRow);
+        updateRemoveButtons();
+
+        // Focus on the new class name input
+        newRow.querySelector('input[name="class_name[]"]').focus();
+    }
+
+    function removeClass(button) {
+        const row = button.closest('.class-row');
+        const container = document.getElementById('classesContainer');
+
+        if (container.children.length > 1) {
+            row.remove();
+            renumberClasses();
+            updateRemoveButtons();
+        }
+    }
+
+    function renumberClasses() {
+        const rows = document.querySelectorAll('.class-row');
+        rows.forEach((row, index) => {
+            row.dataset.index = index;
+            row.querySelector('.class-row-number').textContent = `Class ${index + 1}`;
+        });
+        classCounter = rows.length;
+    }
+
+    function updateRemoveButtons() {
+        const rows = document.querySelectorAll('.class-row');
+        const buttons = document.querySelectorAll('.btn-remove-class');
+
+        buttons.forEach(btn => {
+            btn.disabled = rows.length <= 1;
+        });
+    }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function () {
+        updateRemoveButtons();
+    });
+</script>
 {% endblock %}

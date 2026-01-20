@@ -254,23 +254,41 @@ def manage_semesters(request):
 
 @login_required
 def add_semester(request):
-    """Add a new semester - dedicated page"""
+    """Add a new semester with classes - dedicated page"""
+    from django.db import transaction
+    
     if not request.user.is_staff:
         return redirect('home')
     
     errors = {}
     form_data = {}
+    classes_data = []
     
     if request.method == 'POST':
         dept_id = request.POST.get('department_id', '').strip()
         number = request.POST.get('number', '').strip()
         academic_year = request.POST.get('academic_year', '').strip()
+        is_active = request.POST.get('is_active', '1') == '1'
         
         form_data = {
             'department_id': dept_id,
             'number': number,
-            'academic_year': academic_year
+            'academic_year': academic_year,
+            'is_active': '1' if is_active else '0'
         }
+        
+        # Collect class data from form
+        class_names = request.POST.getlist('class_name[]')
+        class_sections = request.POST.getlist('class_section[]')
+        class_statuses = request.POST.getlist('class_status[]')
+        
+        # Build classes data list for template re-rendering
+        for i in range(len(class_names)):
+            classes_data.append({
+                'name': class_names[i] if i < len(class_names) else '',
+                'section': class_sections[i] if i < len(class_sections) else '',
+                'status': class_statuses[i] if i < len(class_statuses) else '1'
+            })
         
         # Validation
         if not dept_id:
@@ -282,24 +300,71 @@ def add_semester(request):
         if not academic_year:
             errors['academic_year'] = 'Academic year is required'
         
+        # Validate classes - at least check that provided class names are not empty
+        class_errors = []
+        for i, cls in enumerate(classes_data):
+            if cls['name'].strip():
+                class_errors.append(None)
+            else:
+                # Only flag error if it's not the only empty row
+                if len(classes_data) > 1 or any(c['name'].strip() for c in classes_data):
+                    class_errors.append('Class name is required')
+                else:
+                    class_errors.append(None)
+        
+        if any(class_errors):
+            errors['classes'] = class_errors
+        
         if dept_id and number and not errors:
             # Check if semester already exists
             existing = Semester.objects.filter(department_id=dept_id, number=number).exists()
             if existing:
                 errors['number'] = f'Semester {number} already exists for this department'
             else:
-                Semester.objects.create(department_id=dept_id, number=number)
-                messages.success(request, f'Semester S{number} created successfully.')
-                return redirect('manage_semesters')
+                try:
+                    with transaction.atomic():
+                        # Create the semester
+                        semester = Semester.objects.create(department_id=dept_id, number=number)
+                        
+                        # Create all classes
+                        classes_created = 0
+                        for cls in classes_data:
+                            class_name = cls['name'].strip()
+                            if class_name:
+                                # Combine name and section if section is provided
+                                section = cls['section'].strip()
+                                full_name = f"{class_name} {section}".strip() if section else class_name
+                                
+                                ClassSection.objects.create(
+                                    semester=semester,
+                                    name=full_name,
+                                    capacity=60  # Default capacity
+                                )
+                                classes_created += 1
+                        
+                        if classes_created > 0:
+                            messages.success(request, f'Semester S{number} created with {classes_created} class(es).')
+                        else:
+                            messages.success(request, f'Semester S{number} created successfully.')
+                        
+                        return redirect('manage_semesters')
+                        
+                except Exception as e:
+                    errors['general'] = f'An error occurred: {str(e)}'
     
     departments = Department.objects.filter(is_active=True)
     selected_dept = request.GET.get('department')
+    
+    # Initialize with one empty class row if no classes data
+    if not classes_data:
+        classes_data = [{'name': '', 'section': '', 'status': '1'}]
     
     return render(request, 'admin/add_semester.html', {
         'departments': departments,
         'selected_dept': int(selected_dept) if selected_dept else None,
         'errors': errors,
-        'form_data': form_data
+        'form_data': form_data,
+        'classes_data': classes_data
     })
 
 
