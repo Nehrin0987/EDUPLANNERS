@@ -18,7 +18,6 @@
         <a href="{% url 'add_subject' %}" class="btn btn-gradient"><i class="bi bi-plus-lg me-2"></i>Add Subject</a>
     </div>
 
-    <!-- Stats Row -->
     <div class="row mb-4">
         <div class="col-md-3 col-6 mb-3">
             <div class="card card-custom text-center p-3">
@@ -46,38 +45,36 @@
         </div>
     </div>
 
-    <!-- Filters -->
     <div class="card card-custom mb-4 p-3">
-        <div class="row g-3 align-items-center">
-            <div class="col-md-4">
-                <label class="form-label small text-muted mb-1">Department</label>
-                <select class="form-select" id="deptFilter" onchange="applyFilters()">
-                    <option value="">All Departments</option>
-                    {% for dept in departments %}
-                    <option value="{{ dept.code }}" {% if selected_dept==dept.code %}selected{% endif %}>{{ dept.code }}
-                        - {{ dept.name }}</option>
-                    {% endfor %}
-                </select>
+        <form method="get" action="{% url 'manage_subjects' %}">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1">Department</label>
+                    <select name="department" class="form-select">
+                        <option value="">All Departments</option>
+                        {% for dept in department_options %}
+                        <option value="{{ dept.code }}" {{ dept.selected }}>{{ dept.code }} - {{ dept.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1">Semester</label>
+                    <select name="semester" class="form-select">
+                        <option value="">All Semesters</option>
+                        {% for sem in semester_options %}
+                        <option value="{{ sem.value }}" {{ sem.selected }}>Semester {{ sem.value }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-primary me-2"><i class="bi bi-funnel me-1"></i>Filter</button>
+                    <a href="{% url 'manage_subjects' %}" class="btn btn-outline-secondary"><i
+                            class="bi bi-x-lg me-1"></i>Clear</a>
+                </div>
             </div>
-            <div class="col-md-4">
-                <label class="form-label small text-muted mb-1">Semester</label>
-                <select class="form-select" id="semFilter" onchange="applyFilters()">
-                    <option value="">All Semesters</option>
-                    {% for i in "12345678" %}
-                    <option value="{{ i }}" {% if selected_sem==i %}selected{% endif %}>Semester {{ i }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-4 d-flex align-items-end">
-                {% if selected_dept or selected_sem %}
-                <button class="btn btn-outline-secondary" onclick="clearFilters()"><i class="bi bi-x-lg me-1"></i>Clear
-                    Filters</button>
-                {% endif %}
-            </div>
-        </div>
+        </form>
     </div>
 
-    <!-- Subject Groups -->
     {% for dept_code, dept_data in grouped_subjects.items %}
     <div class="card card-custom mb-4 overflow-hidden">
         <div class="card-header bg-gradient text-white py-3">
@@ -92,12 +89,9 @@
                     <h6 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Semester {{ sem_num }}</h6>
                 </div>
                 <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-primary">{{ sem_data.subjects|length }} subject{{
-                        sem_data.subjects|length|pluralize }}</span>
-                    <a href="{% url 'add_subject' %}?dept={{ sem_data.dept_id }}&sem={{ sem_data.sem_id }}"
-                        class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-plus"></i> Add Subject
-                    </a>
+                    <span class="badge bg-primary">{{ sem_data.subjects|length }} subjects</span>
+                    <a href="{% url 'add_subject' %}?dept={{ dept_data.id }}&sem={{ sem_data.id }}"
+                        class="btn btn-sm btn-outline-primary"><i class="bi bi-plus"></i> Add Subject</a>
                 </div>
             </div>
             <div class="p-3">
@@ -108,13 +102,7 @@
                             <div class="card-body">
                                 <div class="d-flex justify-content-between mb-2">
                                     <span class="badge badge-gradient">{{ subject.code }}</span>
-                                    {% if subject.subject_type == 'THEORY' %}
-                                    <span class="badge bg-info">Theory</span>
-                                    {% elif subject.subject_type == 'LAB' %}
-                                    <span class="badge bg-success">Lab</span>
-                                    {% else %}
-                                    <span class="badge bg-warning text-dark">Elective</span>
-                                    {% endif %}
+                                    <span class="badge {{ subject.type_badge }}">{{ subject.type_display }}</span>
                                 </div>
                                 <h6 class="card-title">{{ subject.name }}</h6>
                                 <p class="card-text small text-muted mb-2">
@@ -148,25 +136,10 @@
     <div class="card card-custom text-center py-5">
         <i class="bi bi-book display-1 text-muted mb-3"></i>
         <h4>No Subjects Found</h4>
-        <p class="text-muted">{% if selected_dept or selected_sem %}No subjects match your filters.{% else %}Add your
-            first subject to get started.{% endif %}</p>
+        <p class="text-muted">No subjects match your criteria. Add your first subject to get started.</p>
         <a href="{% url 'add_subject' %}" class="btn btn-gradient mt-2"><i class="bi bi-plus-lg me-2"></i>Add
             Subject</a>
     </div>
     {% endfor %}
 </div>
-
-<script>
-    function applyFilters() {
-        const dept = document.getElementById('deptFilter').value;
-        const sem = document.getElementById('semFilter').value;
-        let url = '{% url "manage_subjects" %}';
-        const params = [];
-        if (dept) params.push('department=' + dept);
-        if (sem) params.push('semester=' + sem);
-        if (params.length > 0) url += '?' + params.join('&');
-        window.location.href = url;
-    }
-    function clearFilters() { window.location.href = '{% url "manage_subjects" %}'; }
-</script>
 {% endblock %}

@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login, logout, authenticate
 from django.contrib import messages
@@ -527,8 +528,23 @@ def manage_subjects(request):
     selected_dept = request.GET.get('department', '')
     selected_sem = request.GET.get('semester', '')
     
-    # Get all departments
+    # Build department options with selected attribute (for template)
     departments = Department.objects.filter(is_active=True).order_by('code')
+    department_options = []
+    for dept in departments:
+        department_options.append({
+            'code': dept.code,
+            'name': dept.name,
+            'selected': 'selected' if selected_dept == dept.code else ''
+        })
+    
+    # Build semester options with selected attribute
+    semester_options = []
+    for i in range(1, 9):
+        semester_options.append({
+            'value': str(i),
+            'selected': 'selected' if selected_sem == str(i) else ''
+        })
     
     # Build subjects query
     subjects = Subject.objects.select_related('department', 'semester')
@@ -540,22 +556,49 @@ def manage_subjects(request):
     
     subjects = subjects.order_by('department__code', 'semester__number', 'code')
     
+    # Type badge mapping
+    type_badges = {
+        'THEORY': 'bg-info',
+        'LAB': 'bg-success',
+        'ELECTIVE': 'bg-warning text-dark'
+    }
+    type_displays = {
+        'THEORY': 'Theory',
+        'LAB': 'Lab',
+        'ELECTIVE': 'Elective'
+    }
+    
     # Group subjects by department and semester
     grouped_subjects = {}
     for subject in subjects:
         dept_code = subject.department.code
+        dept_id = subject.department.id
         sem_num = subject.semester.number
-        
+        sem_id = subject.semester.id
+
         if dept_code not in grouped_subjects:
             grouped_subjects[dept_code] = {
                 'name': subject.department.name,
+                'id': dept_id,
                 'semesters': {}
             }
-        
+
         if sem_num not in grouped_subjects[dept_code]['semesters']:
-            grouped_subjects[dept_code]['semesters'][sem_num] = []
+            grouped_subjects[dept_code]['semesters'][sem_num] = {
+                'subjects': [],
+                'id': sem_id
+            }
         
-        grouped_subjects[dept_code]['semesters'][sem_num].append(subject)
+        # Add subject with display info
+        grouped_subjects[dept_code]['semesters'][sem_num]['subjects'].append({
+            'id': subject.id,
+            'code': subject.code,
+            'name': subject.name,
+            'hours_per_week': subject.hours_per_week,
+            'credits': subject.credits,
+            'type_badge': type_badges.get(subject.subject_type, 'bg-secondary'),
+            'type_display': type_displays.get(subject.subject_type, subject.subject_type)
+        })
     
     # Get counts
     total_subjects = Subject.objects.count()
@@ -565,9 +608,8 @@ def manage_subjects(request):
     
     return render(request, 'admin/subjects.html', {
         'grouped_subjects': grouped_subjects,
-        'departments': departments,
-        'selected_dept': selected_dept,
-        'selected_sem': selected_sem,
+        'department_options': department_options,
+        'semester_options': semester_options,
         'total_subjects': total_subjects,
         'theory_count': theory_count,
         'lab_count': lab_count,
@@ -596,7 +638,6 @@ def add_subject(request):
         preset_dept = Department.objects.filter(id=preset_dept_id, is_active=True).first()
     if preset_sem_id:
         preset_sem = Semester.objects.select_related('department').filter(id=preset_sem_id).first()
-        # If we have a preset semester, also set the department from it
         if preset_sem and not preset_dept:
             preset_dept = preset_sem.department
     
@@ -609,7 +650,7 @@ def add_subject(request):
         semesters_by_dept[dept_id].append({'id': sem.id, 'number': sem.number})
     
     errors = {}
-    form_data = {}
+    form_data = {'code': '', 'name': '', 'hours_per_week': '3', 'credits': '3', 'subject_type': 'THEORY'}
     
     if request.method == 'POST':
         code = request.POST.get('code', '').strip().upper()
@@ -644,20 +685,43 @@ def add_subject(request):
                 hours_per_week=int(hours_per_week), credits=int(credits)
             )
             messages.success(request, f'Subject "{code}" added successfully!')
-            # Redirect back with filters if they were preset
             if preset_dept:
                 return redirect(f"{reverse('manage_subjects')}?department={preset_dept.code}")
             return redirect('manage_subjects')
     
+    # Prepare department options with selected attribute
+    selected_dept_id = form_data.get('department_id', '')
+    department_options = []
+    for dept in departments:
+        department_options.append({
+            'id': dept.id,
+            'code': dept.code,
+            'name': dept.name,
+            'selected': 'selected' if str(dept.id) == str(selected_dept_id) else ''
+        })
+    
+    # Prepare type options with checked attribute
+    current_type = form_data.get('subject_type', 'THEORY')
+    type_options = [
+        {'value': 'THEORY', 'label': 'Theory', 'icon': 'bi bi-journal-text text-info me-1', 'checked': 'checked' if current_type == 'THEORY' else ''},
+        {'value': 'LAB', 'label': 'Lab', 'icon': 'bi bi-pc-display text-success me-1', 'checked': 'checked' if current_type == 'LAB' else ''},
+        {'value': 'ELECTIVE', 'label': 'Elective', 'icon': 'bi bi-bookmark-star text-warning me-1', 'checked': 'checked' if current_type == 'ELECTIVE' else ''},
+    ]
+    
     return render(request, 'admin/add_subject.html', {
-        'departments': departments,
-        'semesters': semesters,
+        'page_title': 'Add Subject',
+        'submit_label': 'Save Subject',
+        'department_options': department_options,
         'semesters_by_dept': json.dumps(semesters_by_dept),
-        'subject_types': Subject.SUBJECT_TYPE_CHOICES,
+        'type_options': type_options,
         'errors': errors,
         'form_data': form_data,
         'preset_dept': preset_dept,
         'preset_sem': preset_sem,
+        'show_dept_dropdown': not preset_dept,
+        'show_sem_dropdown': not preset_sem,
+        'current_dept_id': str(preset_dept.id) if preset_dept else selected_dept_id,
+        'current_sem_id': str(preset_sem.id) if preset_sem else form_data.get('semester_id', ''),
     })
 
 
