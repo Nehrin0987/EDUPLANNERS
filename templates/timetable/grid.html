@@ -1,0 +1,51 @@
+<div class="table-responsive">
+    <table class="table timetable-grid mb-0">
+        <thead>
+            <tr>
+                <th style="width: 80px;">Period</th>
+                <th>MON</th>
+                <th>TUE</th>
+                <th>WED</th>
+                <th>THU</th>
+                <th>FRI</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for period_row in grid %}
+            <tr>
+                <td class="fw-bold">
+                    {{ period_row.period_display }}<br>
+                    <small class="text-muted">{{ period_row.period_time }}</small>
+                </td>
+                {% for cell in period_row.days %}
+                <td class="{{ cell.css_class }}" title="{{ cell.tooltip }}">
+                    {% if cell.has_entry %}
+                    <div class="timetable-cell">
+                        <span class="subject-code">{{ cell.display_line1 }}</span>
+                        <span class="faculty-name">{{ cell.display_line2 }}</span>
+                        {% if cell.display_line3 %}
+                        <small class="text-warning">{{ cell.display_line3 }}</small>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Legend -->
+<div class="mt-4 d-flex gap-4 flex-wrap">
+    <div class="d-flex align-items-center">
+        <div style="width: 24px; height: 24px; background: rgba(102, 126, 234, 0.15); border-radius: 6px;" class="me-2">
+        </div>
+        <span class="text-muted">Theory Subject</span>
+    </div>
+    <div class="d-flex align-items-center">
+        <div style="width: 24px; height: 24px; background: rgba(17, 153, 142, 0.2); border-radius: 6px;" class="me-2">
+        </div>
+        <span class="text-muted">Lab Session</span>
+    </div>
+</div>

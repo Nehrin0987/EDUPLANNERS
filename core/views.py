@@ -807,62 +807,145 @@ def toggle_semester_mode(request):
 @login_required
 @require_POST
 def generate_timetable_view(request):
-    """Generate timetable for a semester using GA"""
+    """Generate timetable for an entire department using GA"""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Access denied'}, status=403)
     
-    semester_id = request.POST.get('semester_id')
+    department_id = request.POST.get('department_id')
     
-    if not semester_id:
-        return JsonResponse({'error': 'Semester ID required'}, status=400)
+    if not department_id:
+        return JsonResponse({'error': 'Department ID required'}, status=400)
     
     config = SystemConfiguration.objects.first()
     semester_instance = config.get_semester_instance() if config else '2024-ODD'
     
     try:
-        result = generate_timetable(int(semester_id), semester_instance)
+        from .genetic_algorithm import generate_department_timetable
+        result = generate_department_timetable(int(department_id), semester_instance)
         return JsonResponse(result)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
 
+
 @login_required
 def initialize_time_slots(request):
-    """Initialize default time slots (7 periods x 5 days)"""
+    """Initialize fixed time slots with validation"""
     if not request.user.is_staff:
         return redirect('home')
     
-    if request.method == 'POST':
-        # Clear existing slots
-        TimeSlot.objects.all().delete()
-        
-        days = ['MON', 'TUE', 'WED', 'THU', 'FRI']
-        times = [
-            ('09:00', '09:50'),
-            ('09:50', '10:40'),
-            ('10:50', '11:40'),
-            ('11:40', '12:30'),
-            ('13:30', '14:20'),
-            ('14:20', '15:10'),
-            ('15:20', '16:10'),
-        ]
-        
-        from datetime import datetime
-        
-        for day in days:
-            for period, (start, end) in enumerate(times, 1):
-                TimeSlot.objects.create(
-                    day=day,
-                    period=period,
-                    start_time=datetime.strptime(start, '%H:%M').time(),
-                    end_time=datetime.strptime(end, '%H:%M').time()
-                )
-        
-        messages.success(request, 'Time slots initialized successfully (7 periods × 5 days).')
-        return redirect('admin_dashboard')
+    # Check if slots already exist
+    slots_count = TimeSlot.objects.count()
     
-    slots_exist = TimeSlot.objects.exists()
-    return render(request, 'admin/init_slots.html', {'slots_exist': slots_exist})
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        
+        if action == 'initialize':
+            if slots_count > 0:
+                messages.error(request, 'Time slots already exist. Use "Re-initialize" to replace them.')
+                return redirect('init_time_slots')
+            
+            _create_time_slots()
+            messages.success(request, f'Time slots initialized successfully! Created {TimeSlot.objects.count()} slots (35 teaching + 5 lunch breaks).')
+            return redirect('admin_dashboard')
+        
+        elif action == 'reinitialize':
+            # Check if any timetable entries exist
+            if TimetableEntry.objects.exists():
+                messages.error(request, 'Cannot re-initialize: Active timetables exist. Delete them first from Django Admin.')
+                return redirect('init_time_slots')
+            
+            # Delete existing slots
+            TimeSlot.objects.all().delete()
+            _create_time_slots()
+            messages.success(request, f'Time slots re-initialized successfully! Created {TimeSlot.objects.count()} slots.')
+            return redirect('admin_dashboard')
+    
+    # PRE-PROCESS ALL DATA IN BACKEND - NO LOGIC IN TEMPLATE
+    display_slots = []
+    
+    if slots_count > 0:
+        # Get first day's slots to show structure (all days have same structure)
+        first_day_slots = TimeSlot.objects.filter(day='MON').order_by('period')
+        
+        for slot in first_day_slots:
+            # Pre-calculate all display properties
+            slot_data = {
+                'period_display': 'Lunch Break' if slot.slot_type == 'LUNCH' else str(slot.period),
+                'start_time': slot.start_time,
+                'end_time': slot.end_time,
+                'duration_minutes': slot.duration_minutes,
+                'is_lunch': slot.slot_type == 'LUNCH',
+                'type_badge_class': _get_badge_class(slot.slot_type),
+                'type_display': _get_type_display(slot.slot_type),
+            }
+            display_slots.append(slot_data)
+    
+    # Teaching and lunch slot counts
+    teaching_count = TimeSlot.objects.filter(slot_type__in=['MORNING', 'AFTERNOON']).count()
+    lunch_count = TimeSlot.objects.filter(slot_type='LUNCH').count()
+    
+    return render(request, 'admin/init_slots.html', {
+        'slots_exist': slots_count > 0,
+        'slots_count': slots_count,
+        'teaching_count': teaching_count,
+        'lunch_count': lunch_count,
+        'display_slots': display_slots,  # Pre-processed, ready to display
+        'has_timetables': TimetableEntry.objects.exists()
+    })
+
+
+def _get_badge_class(slot_type):
+    """Return Bootstrap badge class for slot type"""
+    if slot_type == 'MORNING':
+        return 'bg-info'
+    elif slot_type == 'AFTERNOON':
+        return 'bg-warning text-dark'
+    elif slot_type == 'LUNCH':
+        return 'bg-secondary'
+    return 'bg-primary'
+
+
+def _get_type_display(slot_type):
+    """Return human-readable display name for slot type"""
+    if slot_type == 'MORNING':
+        return 'Morning'
+    elif slot_type == 'AFTERNOON':
+        return 'Afternoon'
+    elif slot_type == 'LUNCH':
+        return 'Non-Teaching'
+    return slot_type
+
+
+def _create_time_slots():
+    """Internal function to create standard time slot configuration"""
+    from datetime import time
+    
+    days = ['MON', 'TUE', 'WED', 'THU', 'FRI']
+    
+    # Define slot structure: (period, start, end, type)
+    slot_structure = [
+        (1, time(9, 0), time(9, 50), 'MORNING'),
+        (2, time(9, 50), time(10, 40), 'MORNING'),
+        (3, time(10, 50), time(11, 40), 'MORNING'),
+        (4, time(11, 40), time(12, 30), 'MORNING'),
+        # Lunch break - period=0 indicates non-teaching slot
+        (0, time(12, 30), time(13, 30), 'LUNCH'),
+        (5, time(13, 30), time(14, 20), 'AFTERNOON'),
+        (6, time(14, 20), time(15, 10), 'AFTERNOON'),
+        (7, time(15, 20), time(16, 10), 'AFTERNOON'),
+    ]
+    
+    for day in days:
+        for period, start, end, slot_type in slot_structure:
+            TimeSlot.objects.create(
+                day=day,
+                period=period,
+                start_time=start,
+                end_time=end,
+                slot_type=slot_type,
+                is_locked=True
+            )
 
 
 # ============ FACULTY DASHBOARD ============
@@ -947,82 +1030,276 @@ def update_preferences(request):
 # ============ TIMETABLE VIEWS ============
 
 def timetable_view(request):
-    """View timetables (class-wise or faculty-wise)"""
-    config = SystemConfiguration.objects.first()
-    semester_instance = config.get_semester_instance() if config else '2024-ODD'
-    
-    view_type = request.GET.get('type', 'class')
+    """View timetables - department-wise or faculty-wise (ALL LOGIC IN BACKEND)"""
+    view_mode = request.GET.get('mode', 'department')  # 'department' or 'faculty'
     selected_id = request.GET.get('id')
     
-    context = {
-        'config': config,
-        'view_type': view_type,
-        'days': ['MON', 'TUE', 'WED', 'THU', 'FRI'],
-        'periods': range(1, 8),
-    }
+    config = SystemConfiguration.objects.first()
     
-    if view_type == 'class':
-        # Get all classes for selection
-        if config and config.active_semester_type == 'ODD':
-            classes = ClassSection.objects.filter(
-                semester__number__in=[1, 3, 5, 7]
-            ).select_related('semester')
-        else:
-            classes = ClassSection.objects.filter(
-                semester__number__in=[2, 4, 6, 8]
-            ).select_related('semester')
-        
-        context['classes'] = classes
-        
-        if selected_id:
-            entries = TimetableEntry.objects.filter(
-                class_section_id=selected_id,
-                semester_instance=semester_instance
-            ).select_related('subject', 'faculty', 'time_slot')
-            
-            timetable_grid = {day: {p: None for p in range(1, 8)} for day in context['days']}
-            
-            for entry in entries:
-                day = entry.time_slot.day
-                period = entry.time_slot.period
-                timetable_grid[day][period] = {
-                    'subject': entry.subject.code,
-                    'subject_name': entry.subject.name,
-                    'faculty': entry.faculty.name,
-                    'is_lab': entry.is_lab_session,
-                    'assistant': entry.assistant_faculty.name if entry.assistant_faculty else None
-                }
-            
-            context['timetable_grid'] = timetable_grid
-            context['selected_class'] = ClassSection.objects.get(id=selected_id)
+    # Prepare data based on mode - ALL FILTERING/GROUPING IN BACKEND
+    if view_mode == 'department':
+        context = _prepare_department_view(selected_id, config)
+    else:
+        context = _prepare_faculty_view(selected_id, config)
     
-    elif view_type == 'faculty':
-        faculties = Faculty.objects.filter(is_active=True)
-        context['faculties'] = faculties
-        
-        if selected_id:
-            entries = TimetableEntry.objects.filter(
-                Q(faculty_id=selected_id) | Q(assistant_faculty_id=selected_id),
-                semester_instance=semester_instance
-            ).select_related('class_section', 'subject', 'time_slot', 'faculty')
-            
-            timetable_grid = {day: {p: None for p in range(1, 8)} for day in context['days']}
-            
-            for entry in entries:
-                day = entry.time_slot.day
-                period = entry.time_slot.period
-                is_assistant = str(entry.assistant_faculty_id) == selected_id
-                timetable_grid[day][period] = {
-                    'subject': entry.subject.code,
-                    'class': str(entry.class_section),
-                    'is_lab': entry.is_lab_session,
-                    'role': 'Assistant' if is_assistant else 'Main'
-                }
-            
-            context['timetable_grid'] = timetable_grid
-            context['selected_faculty'] = Faculty.objects.get(id=selected_id)
+    context['view_mode'] = view_mode
+    context['config'] = config
     
     return render(request, 'timetable/view.html', context)
+
+
+def _prepare_department_view(department_id, config):
+    """
+    Prepare department-wise timetable data.
+    Returns pre-grouped, pre-processed data ready for template display.
+    NO LOGIC IN TEMPLATE - ALL DONE HERE.
+    """
+    semester_instance = config.get_semester_instance() if config else '2024-ODD'
+    
+    # Get all departments for selection
+    departments = Department.objects.filter(is_active=True).order_by('code')
+    departments_list = []
+    for dept in departments:
+        departments_list.append({
+            'id': dept.id,
+            'name': dept.name,
+            'code': dept.code,
+            'full_name': f'{dept.code} - {dept.name}',
+            'is_selected': str(dept.id) == str(department_id) if department_id else False
+        })
+    
+    result = {
+        'departments': departments_list,
+        'selected_department': None,
+        'timetable_data': [],
+        'has_data': False
+    }
+    
+    if not department_id:
+        return result
+    
+    # Get selected department
+    try:
+        department = Department.objects.get(id=department_id)
+        result['selected_department'] = {
+            'id': department.id,
+            'name': department.name,
+            'code': department.code,
+            'full_name': f'{department.code} - {department.name}'
+        }
+    except Department.DoesNotExist:
+        return result
+    
+    # Determine semester numbers based on active type
+    semester_numbers = [1, 3, 5, 7] if config and config.active_semester_type == 'ODD' else [2, 4, 6, 8]
+    
+    # Get semesters for this department
+    semesters = Semester.objects.filter(
+        department_id=department_id,
+        number__in=semester_numbers
+    ).order_by('number')
+    
+    # Build timetable data structure: Department → Semesters → Classes → Grids
+    timetable_data = []
+    
+    for semester in semesters:
+        semester_data = {
+            'semester_number': semester.number,
+            'semester_name': f'Semester {semester.number}',
+            'semester_display': str(semester),
+            'classes': []
+        }
+        
+        classes = ClassSection.objects.filter(semester=semester).order_by('name')
+        
+        for class_section in classes:
+            entries = TimetableEntry.objects.filter(
+                class_section=class_section,
+                semester_instance=semester_instance
+            ).select_related('subject', 'faculty', 'time_slot', 'assistant_faculty')
+            
+            if not entries.exists():
+                continue  # Skip classes with no timetable generated yet
+            
+            # Build timetable grid with pre-processed data
+            grid = _build_timetable_grid(entries, 'class')
+            
+            class_data = {
+                'class_id': class_section.id,
+                'class_name': class_section.name,
+                'class_display': f'{semester}-{class_section.name}',
+                'full_name': f'{semester} - Section {class_section.name}',
+                'timetable_grid': grid,
+                'entry_count': entries.count()
+            }
+            semester_data['classes'].append(class_data)
+        
+        if semester_data['classes']:  # Only add semester if it has classes with timetables
+            timetable_data.append(semester_data)
+    
+    result['timetable_data'] = timetable_data
+    result['has_data'] = len(timetable_data) > 0
+    
+    return result
+
+
+def _prepare_faculty_view(faculty_id, config):
+    """
+    Prepare faculty-wise timetable data.
+    Shows consolidated schedule for a faculty member.
+    """
+    semester_instance = config.get_semester_instance() if config else '2024-ODD'
+    
+    # Get all active faculty for selection
+    faculties = Faculty.objects.filter(is_active=True).order_by('name')
+    faculties_list = []
+    for fac in faculties:
+        faculties_list.append({
+            'id': fac.id,
+            'name': fac.name,
+            'designation': fac.get_designation_display(),
+            'full_display': f'{fac.name} ({fac.get_designation_display()})',
+            'is_selected': str(fac.id) == str(faculty_id) if faculty_id else False
+        })
+    
+    result = {
+        'faculties': faculties_list,
+        'selected_faculty': None,
+        'timetable_grid': [],
+        'has_data': False
+    }
+    
+    if not faculty_id:
+        return result
+    
+    try:
+        faculty = Faculty.objects.get(id=faculty_id)
+        result['selected_faculty'] = {
+            'id': faculty.id,
+            'name': faculty.name,
+            'designation': faculty.get_designation_display(),
+            'department': faculty.department.code if faculty.department else 'N/A'
+        }
+    except Faculty.DoesNotExist:
+        return result
+    
+    # Get all entries where this faculty is assigned (main or assistant)
+    entries = TimetableEntry.objects.filter(
+        Q(faculty_id=faculty_id) | Q(assistant_faculty_id=faculty_id),
+        semester_instance=semester_instance
+    ).select_related('class_section', 'subject', 'time_slot', 'faculty', 'assistant_faculty')
+    
+    if entries.exists():
+        result['timetable_grid'] = _build_timetable_grid(entries, 'faculty', faculty_id)
+        result['has_data'] = True
+    
+    return result
+
+
+def _build_timetable_grid(entries, view_type, faculty_id=None):
+    """
+    Build timetable grid structure with pre-processed, ready-to-display data.
+    Returns list of periods, each containing list of days with cell data.
+    
+    Args:
+        entries: QuerySet of TimetableEntry objects
+        view_type: 'class' or 'faculty'
+        faculty_id: Required for faculty view to determine assistant role
+    
+    Returns:
+        List of dicts with structure:
+        [{
+            'period_number': 1,
+            'period_time': '09:00',
+            'days': [
+                {
+                    'day_code': 'MON',
+                    'has_entry': True/False,
+                    'display_line1': 'CS201',
+                    'display_line2': 'Dr. Kumar',
+                    'display_line3': '+ Asst',
+                    'css_class': 'theory-cell' or 'lab-cell' or 'empty-cell'
+                },
+                ...
+            ]
+        }, ...]
+    """
+    days = ['MON', 'TUE', 'WED', 'THU', 'FRI']
+    periods = range(1, 8)
+    
+    # Get period times from database (no hardcoding)
+    period_times = _get_period_times()
+    
+    # Build grid data
+    grid_data = []
+    
+    for period in periods:
+        period_row = {
+            'period_number': period,
+            'period_time': period_times.get(period, ''),
+            'period_display': f'P{period}',
+            'days': []
+        }
+        
+        for day in days:
+            # Initialize empty cell
+            cell = {
+                'day_code': day,
+                'has_entry': False,
+                'display_line1': '',
+                'display_line2': '',
+                'display_line3': '',
+                'tooltip': '',
+                'css_class': 'empty-cell'
+            }
+            
+            # Find entry for this day/period
+            matching_entry = None
+            for entry in entries:
+                if entry.time_slot.day == day and entry.time_slot.period == period:
+                    matching_entry = entry
+                    break
+            
+            if matching_entry:
+                if view_type == 'class':
+                    # Class view: Show subject + faculty
+                    cell.update({
+                        'has_entry': True,
+                        'display_line1': matching_entry.subject.code,
+                        'display_line2': matching_entry.faculty.name,
+                        'display_line3': f'+ {matching_entry.assistant_faculty.name}' if matching_entry.assistant_faculty else '',
+                        'tooltip': matching_entry.subject.name,
+                        'css_class': 'lab-cell' if matching_entry.is_lab_session else 'theory-cell'
+                    })
+                else:
+                    # Faculty view: Show subject + class they're teaching
+                    is_assistant = matching_entry.assistant_faculty_id and str(matching_entry.assistant_faculty_id) == str(faculty_id)
+                    cell.update({
+                        'has_entry': True,
+                        'display_line1': matching_entry.subject.code,
+                        'display_line2': str(matching_entry.class_section),
+                        'display_line3': '(Assistant)' if is_assistant else '',
+                        'tooltip': f'{matching_entry.subject.name} - {matching_entry.class_section}',
+                        'css_class': 'lab-cell' if matching_entry.is_lab_session else 'theory-cell'
+                    })
+            
+            period_row['days'].append(cell)
+        
+        grid_data.append(period_row)
+    
+    return grid_data
+
+
+def _get_period_times():
+    """
+    Get period times from database (no hardcoding in template).
+    Returns dict mapping period number to start time string.
+    """
+    slots = TimeSlot.objects.filter(
+        slot_type__in=['MORNING', 'AFTERNOON']
+    ).order_by('period').values('period', 'start_time')
+    
+    return {slot['period']: slot['start_time'].strftime('%H:%M') for slot in slots}
 
 
 def export_timetable_pdf(request):

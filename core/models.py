@@ -179,7 +179,7 @@ class FacultySubjectAssignment(models.Model):
 
 
 class TimeSlot(models.Model):
-    """Time slots for the timetable (7 periods/day, 5 days)"""
+    """Fixed, immutable time slots for timetable infrastructure"""
     DAY_CHOICES = [
         ('MON', 'Monday'),
         ('TUE', 'Tuesday'),
@@ -188,25 +188,60 @@ class TimeSlot(models.Model):
         ('FRI', 'Friday'),
     ]
     
+    SLOT_TYPE_CHOICES = [
+        ('MORNING', 'Morning Period'),
+        ('AFTERNOON', 'Afternoon Period'),
+        ('LUNCH', 'Lunch Break'),
+    ]
+    
     day = models.CharField(max_length=3, choices=DAY_CHOICES)
-    period = models.IntegerField()  # 1-7
-    start_time = models.TimeField(null=True, blank=True)
-    end_time = models.TimeField(null=True, blank=True)
+    period = models.IntegerField()  # 1-7 for teaching, 0 for lunch
+    start_time = models.TimeField()  # Made required (no null/blank)
+    end_time = models.TimeField()    # Made required (no null/blank)
+    slot_type = models.CharField(max_length=10, choices=SLOT_TYPE_CHOICES, default='MORNING')
+    is_locked = models.BooleanField(default=True, help_text="Prevent modifications to slot")
     
     @property
     def is_morning(self):
-        return self.period <= 4
+        return self.slot_type == 'MORNING'
     
     @property
     def is_afternoon(self):
-        return self.period >= 5
+        return self.slot_type == 'AFTERNOON'
+    
+    @property
+    def is_teaching_slot(self):
+        """Only morning/afternoon slots can be used for teaching"""
+        return self.slot_type in ['MORNING', 'AFTERNOON']
     
     @property
     def slot_name(self):
         return f"{self.get_day_display()} Period {self.period}"
     
+    @property
+    def duration_minutes(self):
+        """Calculate slot duration in minutes"""
+        from datetime import datetime
+        start = datetime.combine(datetime.today(), self.start_time)
+        end = datetime.combine(datetime.today(), self.end_time)
+        return int((end - start).total_seconds() / 60)
+    
     def __str__(self):
+        if self.slot_type == 'LUNCH':
+            return f"{self.day}-LUNCH"
         return f"{self.day}-P{self.period}"
+    
+    def save(self, *args, **kwargs):
+        """Prevent modifications to locked slots"""
+        if self.pk and self.is_locked:
+            # Check if this is just unlocking the slot
+            old = TimeSlot.objects.get(pk=self.pk)
+            # Allow only is_locked field changes
+            if (old.day != self.day or old.period != self.period or 
+                old.start_time != self.start_time or old.end_time != self.end_time or
+                old.slot_type != self.slot_type):
+                raise ValueError("Cannot modify locked time slot. Unlock it first.")
+        super().save(*args, **kwargs)
     
     class Meta:
         unique_together = ['day', 'period']

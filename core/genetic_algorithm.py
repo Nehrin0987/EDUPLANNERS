@@ -18,6 +18,7 @@ import copy
 from collections import defaultdict
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, field
+from django.db.models import Q
 
 
 @dataclass
@@ -563,7 +564,24 @@ def generate_timetable(semester_id: int, semester_instance: str):
     for f in faculties:
         f['max_hours'] = Faculty.WORKLOAD_LIMITS.get(f['designation'], 20)
     
-    time_slots = list(TimeSlot.objects.all().values('id', 'day', 'period'))
+    # VALIDATE TIME SLOTS - Only use teaching slots (not lunch)
+    time_slots = list(TimeSlot.objects.filter(
+        slot_type__in=['MORNING', 'AFTERNOON']
+    ).values('id', 'day', 'period'))
+    
+    if not time_slots:
+        return {
+            'success': False,
+            'error': 'No time slots configured. Please initialize time slots first.'
+        }
+    
+    # Verify we have the expected number of teaching slots
+    expected_slots = 7 * 5  # 7 periods × 5 days
+    if len(time_slots) != expected_slots:
+        return {
+            'success': False,
+            'error': f'Invalid time slot configuration. Expected {expected_slots} teaching slots, found {len(time_slots)}. Please re-initialize time slots.'
+        }
     
     # Load faculty preferences
     faculty_preferences = {}
@@ -645,4 +663,229 @@ def generate_timetable(semester_id: int, semester_instance: str):
         'final_fitness': best_solution.fitness,
         'generations_run': len(fitness_history),
         'fitness_history': fitness_history
+    }
+
+
+def generate_department_timetable(department_id: int, semester_instance: str):
+    """
+    Generate timetables for ALL semesters and classes within a department.
+    
+    This ensures faculty conflicts are avoided across the entire department,
+    not just within a single semester.
+    
+    Args:
+        department_id: ID of the department to generate timetables for
+        semester_instance: e.g., "2024-ODD" or "2024-EVEN"
+    
+    Returns:
+        Dictionary with structured timetable data grouped by semester and class
+    """
+    from core.models import (
+        Department, Semester, ClassSection, Subject, Faculty, TimeSlot,
+        FacultySubjectAssignment, TimetableEntry, SystemConfiguration
+    )
+    
+    # Get department info
+    department = Department.objects.get(id=department_id)
+    
+    # Determine which semester numbers to include based on ODD/EVEN
+    config = SystemConfiguration.objects.first()
+    if config and config.active_semester_type == 'ODD':
+        semester_numbers = [1, 3, 5, 7]
+    else:
+        semester_numbers = [2, 4, 6, 8]
+    
+    # Get all semesters for this department matching the active type
+    semesters = Semester.objects.filter(
+        department_id=department_id,
+        number__in=semester_numbers
+    ).order_by('number')
+    
+    if not semesters.exists():
+        return {
+            'success': False,
+            'error': f'No {config.active_semester_type} semesters found for {department.code}'
+        }
+    
+    semester_ids = list(semesters.values_list('id', flat=True))
+    
+    # Get ALL classes across all semesters in this department
+    classes = list(ClassSection.objects.filter(
+        semester_id__in=semester_ids
+    ).values('id', 'name', 'semester_id'))
+    
+    if not classes:
+        return {
+            'success': False,
+            'error': f'No classes found for {department.code} in {config.active_semester_type} semesters'
+        }
+    
+    # Get ALL subjects across all semesters in this department
+    subjects = list(Subject.objects.filter(
+        semester_id__in=semester_ids
+    ).values('id', 'name', 'code', 'subject_type', 'hours_per_week', 'semester_id'))
+    
+    if not subjects:
+        return {
+            'success': False,
+            'error': f'No subjects found for {department.code}'
+        }
+    
+    # Get all active faculty (department-wide or unassigned)
+    faculties = list(Faculty.objects.filter(
+        is_active=True
+    ).filter(
+        Q(department_id=department_id) | Q(department_id__isnull=True)
+    ).values('id', 'name', 'designation', 'preferences'))
+    
+    if not faculties:
+        # Fallback to all active faculty
+        faculties = list(Faculty.objects.filter(
+            is_active=True
+        ).values('id', 'name', 'designation', 'preferences'))
+    
+    # Add max_hours to faculty data
+    for f in faculties:
+        f['max_hours'] = Faculty.WORKLOAD_LIMITS.get(f['designation'], 20)
+    
+    # VALIDATE TIME SLOTS - Only use teaching slots (not lunch)
+    time_slots = list(TimeSlot.objects.filter(
+        slot_type__in=['MORNING', 'AFTERNOON']
+    ).values('id', 'day', 'period'))
+    
+    if not time_slots:
+        return {
+            'success': False,
+            'error': 'No time slots configured. Please initialize time slots first.'
+        }
+    
+    # Verify we have the expected number of teaching slots
+    expected_slots = 7 * 5  # 7 periods × 5 days
+    if len(time_slots) != expected_slots:
+        return {
+            'success': False,
+            'error': f'Invalid time slot configuration. Expected {expected_slots} teaching slots, found {len(time_slots)}. Please re-initialize time slots.'
+        }
+    
+    if not time_slots:
+        return {
+            'success': False,
+            'error': 'No time slots configured. Please initialize time slots first.'
+        }
+    
+    # Load faculty preferences
+    faculty_preferences = {}
+    for f in faculties:
+        if f['preferences']:
+            faculty_preferences[f['id']] = [p.strip() for p in f['preferences'].split(',')]
+    
+    # Load faculty history for subject rotation
+    faculty_history = defaultdict(list)
+    assignments = FacultySubjectAssignment.objects.exclude(
+        semester_instance=semester_instance
+    ).select_related('subject')
+    
+    for assignment in assignments:
+        faculty_history[assignment.faculty_id].append(assignment.subject.code)
+    
+    # Initialize and run GA for entire department
+    ga = GeneticAlgorithm(
+        population_size=100,
+        generations=500,
+        crossover_rate=0.8,
+        mutation_rate=0.1,
+        elite_count=5,
+        tournament_size=5
+    )
+    
+    ga.load_data(
+        classes=classes,
+        subjects=subjects,
+        faculties=faculties,
+        time_slots=time_slots,
+        faculty_preferences=faculty_preferences,
+        faculty_history=dict(faculty_history)
+    )
+    
+    best_solution, fitness_history = ga.evolve()
+    
+    # Clear existing entries for ALL semesters in this department for this instance
+    TimetableEntry.objects.filter(
+        class_section__semester_id__in=semester_ids,
+        semester_instance=semester_instance
+    ).delete()
+    
+    # Save solution to database and build structured response
+    entries_created = []
+    timetables_by_semester = {}
+    
+    # Build semester info map
+    semester_info = {s.id: {'number': s.number, 'name': str(s)} for s in semesters}
+    
+    # Build class info map
+    class_info = {c['id']: c for c in classes}
+    
+    for gene in best_solution.genes:
+        entry = TimetableEntry.objects.create(
+            class_section_id=gene.class_id,
+            subject_id=gene.subject_id,
+            faculty_id=gene.faculty_id,
+            time_slot_id=gene.time_slot_id,
+            semester_instance=semester_instance,
+            is_lab_session=gene.is_lab,
+            assistant_faculty_id=gene.assistant_faculty_id
+        )
+        entries_created.append(entry)
+        
+        # Build structured response
+        class_data = class_info.get(gene.class_id, {})
+        sem_id = class_data.get('semester_id')
+        
+        if sem_id and sem_id in semester_info:
+            if sem_id not in timetables_by_semester:
+                timetables_by_semester[sem_id] = {
+                    'semester_number': semester_info[sem_id]['number'],
+                    'semester_name': semester_info[sem_id]['name'],
+                    'classes': {}
+                }
+            
+            if gene.class_id not in timetables_by_semester[sem_id]['classes']:
+                timetables_by_semester[sem_id]['classes'][gene.class_id] = {
+                    'class_name': class_data.get('name', 'Unknown'),
+                    'entry_count': 0
+                }
+            
+            timetables_by_semester[sem_id]['classes'][gene.class_id]['entry_count'] += 1
+        
+        # Create faculty-subject assignment for tracking
+        FacultySubjectAssignment.objects.get_or_create(
+            faculty_id=gene.faculty_id,
+            subject_id=gene.subject_id,
+            semester_instance=semester_instance,
+            class_section_id=gene.class_id,
+            defaults={'is_main': True}
+        )
+        
+        if gene.assistant_faculty_id:
+            FacultySubjectAssignment.objects.get_or_create(
+                faculty_id=gene.assistant_faculty_id,
+                subject_id=gene.subject_id,
+                semester_instance=semester_instance,
+                class_section_id=gene.class_id,
+                defaults={'is_main': False}
+            )
+    
+    return {
+        'success': True,
+        'department': {
+            'id': department.id,
+            'name': department.name,
+            'code': department.code
+        },
+        'timetables': timetables_by_semester,
+        'total_entries': len(entries_created),
+        'classes_count': len(classes),
+        'semesters_count': len(semester_ids),
+        'final_fitness': best_solution.fitness,
+        'generations_run': len(fitness_history)
     }

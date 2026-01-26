@@ -124,17 +124,17 @@
                     <i class="bi bi-lightning-charge me-2"></i>Generate Timetable
                 </h5>
                 <p class="text-muted mb-3">
-                    Select a semester to generate conflict-free timetables for all classes using Genetic Algorithm.
+                    Select a department to generate conflict-free timetables for all semesters and classes using Genetic
+                    Algorithm.
                 </p>
 
                 <div class="row g-3 align-items-end">
                     <div class="col-md-6">
-                        <label class="form-label">Select Semester</label>
-                        <select class="form-select" id="semester-select">
-                            <option value="">-- Select Semester --</option>
-                            {% for semester in active_semesters %}
-                            <option value="{{ semester.id }}">{{ semester }} ({{ semester.sections.count }} classes)
-                            </option>
+                        <label class="form-label">Select Department</label>
+                        <select class="form-select" id="department-select">
+                            <option value="">-- Select Department --</option>
+                            {% for dept in departments %}
+                            <option value="{{ dept.id }}">{{ dept.code }} - {{ dept.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -239,9 +239,9 @@
     }
 
     function generateTimetable() {
-        const semesterId = document.getElementById('semester-select').value;
-        if (!semesterId) {
-            alert('Please select a semester');
+        const departmentId = document.getElementById('department-select').value;
+        if (!departmentId) {
+            alert('Please select a department');
             return;
         }
 
@@ -259,7 +259,7 @@
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'X-CSRFToken': '{{ csrf_token }}'
             },
-            body: 'semester_id=' + semesterId
+            body: 'department_id=' + departmentId
         })
             .then(response => response.json())
             .then(data => {
@@ -269,7 +269,7 @@
                 if (data.success) {
                     result.classList.remove('d-none');
                     document.getElementById('result-text').textContent =
-                        `Timetable generated successfully! Created ${data.entries_created} entries. Final fitness: ${data.final_fitness.toFixed(2)}. Generations: ${data.generations_run}`;
+                        `Timetable generated for ${data.department.code}! Created ${data.total_entries} entries across ${data.semesters_count} semesters and ${data.classes_count} classes. Fitness: ${data.final_fitness.toFixed(2)}. Generations: ${data.generations_run}`;
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
                 }
